@@ -5599,7 +5599,7 @@ public static <T> T requireNonNull(T obj) {
 
 > **不要在 foreach 循环里进行元素的 `remove/add` 操作。remove 元素请使用 `Iterator` 方式，如果并发操作，需要对 `Iterator` 对象加锁。**
 
-通过反编译你会发现 foreach 语法底层其实还是依赖 `Iterator` 。不过， `remove/add` 操作直接调用的是集合自己的方法，而不是 `Iterator` 的 `remove/add`方法
+通过反编译发现 foreach 语法底层其实还是依赖 `Iterator` 。不过， `remove/add` 操作直接调用的是集合自己的方法，而不是 `Iterator` 的 `remove/add`方法
 
 这就导致 `Iterator` 莫名其妙地发现自己有元素被 `remove/add` ，然后，它就会抛出一个 `ConcurrentModificationException` 来提示用户发生了并发修改异常。这就是单线程状态下产生的 **fail-fast 机制**。
 
@@ -7264,7 +7264,1067 @@ System.out.println("清空后的链表：" + list);
 
 #### HashMap
 
+**类的属性：**
+
+```java
+public class HashMap<K,V> extends AbstractMap<K,V> implements Map<K,V>, Cloneable, Serializable {
+    // 序列号
+    private static final long serialVersionUID = 362498820763181265L;
+    // 默认的初始容量是16
+    static final int DEFAULT_INITIAL_CAPACITY = 1 << 4;
+    // 最大容量
+    static final int MAXIMUM_CAPACITY = 1 << 30;
+    // 默认的负载因子
+    static final float DEFAULT_LOAD_FACTOR = 0.75f;
+    // 当桶(bucket)上的结点数大于等于这个值时会转成红黑树
+    static final int TREEIFY_THRESHOLD = 8;
+    // 当桶(bucket)上的结点数小于等于这个值时树转链表
+    static final int UNTREEIFY_THRESHOLD = 6;
+    // 桶中结构转化为红黑树对应的table的最小容量
+    static final int MIN_TREEIFY_CAPACITY = 64;
+    // 存储元素的数组，总是2的幂次倍
+    transient Node<K,V>[] table;
+    // 存放具体元素的集
+    transient Set<Map.Entry<K,>> entrySet;
+    // 存放元素的个数，注意这个不等于数组的长度
+    transient int size;
+    // 每次扩容和更改map结构的计数器
+    transient int modCount;
+    // 阈值(容量*负载因子) 当实际大小超过阈值时，会进行扩容
+    int threshold;
+    // 负载因子
+    final float loadFactor;
+}
+```
+
+- **loadFactor 负载因子**
+
+  loadFactor 负载因子是控制数组存放数据的疏密程度，loadFactor 越趋近于 1，那么 数组中存放的数据(entry)也就越多，也就越密，也就是会让链表的长度增加，loadFactor 越小，也就是趋近于 0，数组中存放的数据(entry)也就越少，也就越稀疏。
+
+  **loadFactor 太大导致查找元素效率低，太小导致数组的利用率低，存放的数据会很分散。loadFactor 的默认值为 0.75f 是官方给出的一个比较好的临界值**。
+
+  给定的默认容量为 16，负载因子为 0.75。Map 在使用过程中不断的往里面存放数据，当数量超过了 16 * 0.75 = 12 就需要将当前 16 的容量进行扩容，而扩容这个过程涉及到 rehash、复制数据等操作，所以非常消耗性能。
+
+- **threshold**
+
+  **threshold = capacity \* loadFactor**，**当 size > threshold** 的时候，那么就要考虑对数组的扩增了，也就是说，这个的意思就是 **衡量数组是否需要扩增的一个标准**。
+
+**Node 节点类源码:**
+
+```java
+// 继承自 Map.Entry<K,V>
+static class Node<K,V> implements Map.Entry<K,V> {
+       final int hash;// 哈希值，存放元素到hashmap中时用来与其他元素hash值比较
+       final K key;//键
+       V value;//值
+       // 指向下一个节点
+       Node<K,V> next;
+       Node(int hash, K key, V value, Node<K,V> next) {
+            this.hash = hash;
+            this.key = key;
+            this.value = value;
+            this.next = next;
+        }
+        public final K getKey()        { return key; }
+        public final V getValue()      { return value; }
+        public final String toString() { return key + "=" + value; }
+        // 重写hashCode()方法
+        public final int hashCode() {
+            return Objects.hashCode(key) ^ Objects.hashCode(value);
+        }
+
+        public final V setValue(V newValue) {
+            V oldValue = value;
+            value = newValue;
+            return oldValue;
+        }
+        // 重写 equals() 方法
+        public final boolean equals(Object o) {
+            if (o == this)
+                return true;
+            if (o instanceof Map.Entry) {
+                Map.Entry<?,?> e = (Map.Entry<?,?>)o;
+                if (Objects.equals(key, e.getKey()) &&
+                    Objects.equals(value, e.getValue()))
+                    return true;
+            }
+            return false;
+        }
+}
+```
+
+**树节点类源码:**
+
+```java
+static final class TreeNode<K,V> extends LinkedHashMap.Entry<K,V> {
+        TreeNode<K,V> parent;  // 父
+        TreeNode<K,V> left;    // 左
+        TreeNode<K,V> right;   // 右
+        TreeNode<K,V> prev;    // needed to unlink next upon deletion
+        boolean red;           // 判断颜色
+        TreeNode(int hash, K key, V val, Node<K,V> next) {
+            super(hash, key, val, next);
+        }
+        // 返回根节点
+        final TreeNode<K,V> root() {
+            for (TreeNode<K,V> r = this, p;;) {
+                if ((p = r.parent) == null)
+                    return r;
+                r = p;
+       }
+```
+
+##### HashMap 源码分析
+
+###### 构造方法
+
+HashMap 中有四个构造方法，它们分别如下：
+
+```java
+// 默认构造函数。
+public HashMap() {
+    this.loadFactor = DEFAULT_LOAD_FACTOR; // all   other fields defaulted
+ }
+
+ // 包含另一个“Map”的构造函数
+ public HashMap(Map<? extends K, ? extends V> m) {
+     this.loadFactor = DEFAULT_LOAD_FACTOR;
+     putMapEntries(m, false);//下面会分析到这个方法
+ }
+
+ // 指定“容量大小”的构造函数
+ public HashMap(int initialCapacity) {
+     this(initialCapacity, DEFAULT_LOAD_FACTOR);
+ }
+
+ // 指定“容量大小”和“负载因子”的构造函数
+ public HashMap(int initialCapacity, float loadFactor) {
+     if (initialCapacity < 0)
+         throw new IllegalArgumentException("Illegal initial capacity: " + initialCapacity);
+     if (initialCapacity > MAXIMUM_CAPACITY)
+         initialCapacity = MAXIMUM_CAPACITY;
+     if (loadFactor <= 0 || Float.isNaN(loadFactor))
+         throw new IllegalArgumentException("Illegal load factor: " + loadFactor);
+     this.loadFactor = loadFactor;
+     // 初始容量暂时存放到 threshold ，在resize中再赋值给 newCap 进行table初始化
+     this.threshold = tableSizeFor(initialCapacity);
+ }
+```
+
+> 值得注意的是上述四个构造方法中，都初始化了负载因子 loadFactor，由于HashMap中没有 capacity 这样的字段，即使指定了初始化容量 initialCapacity ，也只是通过 tableSizeFor 将其扩容到与 initialCapacity 最接近的2的幂次方大小，然后暂时赋值给 threshold ，后续通过 resize 方法将 threshold 赋值给 newCap 进行 table 的初始化。
+
+**putMapEntries 方法：**
+
+```java
+final void putMapEntries(Map<? extends K, ? extends V> m, boolean evict) {
+    int s = m.size();
+    if (s > 0) {
+        // 判断table是否已经初始化
+        if (table == null) { // pre-size
+            /*
+             * 未初始化，s为m的实际元素个数，ft=s/loadFactor => s=ft*loadFactor, 跟我们前面提到的
+             * 阈值=容量*负载因子 是不是很像，是的，ft指的是要添加s个元素所需的最小的容量
+             */
+            float ft = ((float)s / loadFactor) + 1.0F;
+            int t = ((ft < (float)MAXIMUM_CAPACITY) ?
+                    (int)ft : MAXIMUM_CAPACITY);
+            /*
+             * 根据构造函数可知，table未初始化，threshold实际上是存放的初始化容量，如果添加s个元素所
+             * 需的最小容量大于初始化容量，则将最小容量扩容为最接近的2的幂次方大小作为初始化。
+             * 注意这里不是初始化阈值
+             */
+            if (t > threshold)
+                threshold = tableSizeFor(t);
+        }
+        // 已初始化，并且m元素个数大于阈值，进行扩容处理
+        else if (s > threshold)
+            resize();
+        // 将m中的所有元素添加至HashMap中，如果table未初始化，putVal中会调用resize初始化或扩容
+        for (Map.Entry<? extends K, ? extends V> e : m.entrySet()) {
+            K key = e.getKey();
+            V value = e.getValue();
+            putVal(hash(key), key, value, false, evict);
+        }
+    }
+}
+```
+
+###### put 方法
+
+HashMap 只提供了 put 用于添加元素，putVal 方法只是给 put 方法调用的一个方法，并没有提供给用户使用。
+
+**对 putVal 方法添加元素的分析如下：**
+
+1. 如果定位到的数组位置没有元素 就直接插入。
+2. 如果定位到的数组位置有元素就和要插入的 key 比较，如果 key 相同就直接覆盖，如果 key 不相同，就判断 p 是否是一个树节点，如果是就调用`e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value)`将元素添加进入。如果不是就遍历链表插入(插入的是链表尾部)。
+
+![put](https://raw.githubusercontent.com/ZXJ-OvO/picgo-img/master/202307161954288.png)
+
+```java
+public V put(K key, V value) {
+    return putVal(hash(key), key, value, false, true);
+}
+
+final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
+                   boolean evict) {
+    Node<K,V>[] tab; Node<K,V> p; int n, i;
+    // table未初始化或者长度为0，进行扩容
+    if ((tab = table) == null || (n = tab.length) == 0)
+        n = (tab = resize()).length;
+    // (n - 1) & hash 确定元素存放在哪个桶中，桶为空，新生成结点放入桶中(此时，这个结点是放在数组中)
+    if ((p = tab[i = (n - 1) & hash]) == null)
+        tab[i] = newNode(hash, key, value, null);
+    // 桶中已经存在元素（处理hash冲突）
+    else {
+        Node<K,V> e; K k;
+        //快速判断第一个节点table[i]的key是否与插入的key一样，若相同就直接使用插入的值p替换掉旧的值e。
+        if (p.hash == hash &&
+            ((k = p.key) == key || (key != null && key.equals(k))))
+                e = p;
+        // 判断插入的是否是红黑树节点
+        else if (p instanceof TreeNode)
+            // 放入树中
+            e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
+        // 不是红黑树节点则说明为链表结点
+        else {
+            // 在链表最末插入结点
+            for (int binCount = 0; ; ++binCount) {
+                // 到达链表的尾部
+                if ((e = p.next) == null) {
+                    // 在尾部插入新结点
+                    p.next = newNode(hash, key, value, null);
+                    // 结点数量达到阈值(默认为 8 )，执行 treeifyBin 方法
+                    // 这个方法会根据 HashMap 数组来决定是否转换为红黑树。
+                    // 只有当数组长度大于或者等于 64 的情况下，才会执行转换红黑树操作，以减少搜索时间。否则，就是只是对数组扩容。
+                    if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
+                        treeifyBin(tab, hash);
+                    // 跳出循环
+                    break;
+                }
+                // 判断链表中结点的key值与插入的元素的key值是否相等
+                if (e.hash == hash &&
+                    ((k = e.key) == key || (key != null && key.equals(k))))
+                    // 相等，跳出循环
+                    break;
+                // 用于遍历桶中的链表，与前面的e = p.next组合，可以遍历链表
+                p = e;
+            }
+        }
+        // 表示在桶中找到key值、hash值与插入元素相等的结点
+        if (e != null) {
+            // 记录e的value
+            V oldValue = e.value;
+            // onlyIfAbsent为false或者旧值为null
+            if (!onlyIfAbsent || oldValue == null)
+                //用新值替换旧值
+                e.value = value;
+            // 访问后回调
+            afterNodeAccess(e);
+            // 返回旧值
+            return oldValue;
+        }
+    }
+    // 结构性修改
+    ++modCount;
+    // 实际大小大于阈值则扩容
+    if (++size > threshold)
+        resize();
+    // 插入后回调
+    afterNodeInsertion(evict);
+    return null;
+}
+```
+
+**我们再来对比一下 JDK1.7 put 方法的代码**
+
+**对于 put 方法的分析如下：**
+
+- ① 如果定位到的数组位置没有元素 就直接插入。
+- ② 如果定位到的数组位置有元素，遍历以这个元素为头结点的链表，依次和插入的 key 比较，如果 key 相同就直接覆盖，不同就采用头插法插入元素。
+
+```java
+public V put(K key, V value)
+    if (table == EMPTY_TABLE) {
+    inflateTable(threshold);
+}
+    if (key == null)
+        return putForNullKey(value);
+    int hash = hash(key);
+    int i = indexFor(hash, table.length);
+    for (Entry<K,V> e = table[i]; e != null; e = e.next) { // 先遍历
+        Object k;
+        if (e.hash == hash && ((k = e.key) == key || key.equals(k))) {
+            V oldValue = e.value;
+            e.value = value;
+            e.recordAccess(this);
+            return oldValue;
+        }
+    }
+
+    modCount++;
+    addEntry(hash, key, value, i);  // 再插入
+    return null;
+}
+```
+
+###### get 方法
+
+```java
+public V get(Object key) {
+    Node<K,V> e;
+    return (e = getNode(hash(key), key)) == null ? null : e.value;
+}
+
+final Node<K,V> getNode(int hash, Object key) {
+    Node<K,V>[] tab; Node<K,V> first, e; int n; K k;
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (first = tab[(n - 1) & hash]) != null) {
+        // 数组元素相等
+        if (first.hash == hash && // always check first node
+            ((k = first.key) == key || (key != null && key.equals(k))))
+            return first;
+        // 桶中不止一个节点
+        if ((e = first.next) != null) {
+            // 在树中get
+            if (first instanceof TreeNode)
+                return ((TreeNode<K,V>)first).getTreeNode(hash, key);
+            // 在链表中get
+            do {
+                if (e.hash == hash &&
+                    ((k = e.key) == key || (key != null && key.equals(k))))
+                    return e;
+            } while ((e = e.next) != null);
+        }
+    }
+    return null;
+}
+```
+
+###### resize 方法
+
+进行扩容，会伴随着一次重新 hash 分配，并且会遍历 hash 表中所有的元素，是非常耗时的。在编写程序中，要尽量避免 resize。resize方法实际上是将 table 初始化和 table 扩容 进行了整合，底层的行为都是给 table 赋值一个新的数组。
+
+```java
+final Node<K,V>[] resize() {
+    Node<K,V>[] oldTab = table;
+    int oldCap = (oldTab == null) ? 0 : oldTab.length;
+    int oldThr = threshold;
+    int newCap, newThr = 0;
+    if (oldCap > 0) {
+        // 超过最大值就不再扩充了，就只好随你碰撞去吧
+        if (oldCap >= MAXIMUM_CAPACITY) {
+            threshold = Integer.MAX_VALUE;
+            return oldTab;
+        }
+        // 没超过最大值，就扩充为原来的2倍
+        else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY && oldCap >= DEFAULT_INITIAL_CAPACITY)
+            newThr = oldThr << 1; // double threshold
+    }
+    else if (oldThr > 0) // initial capacity was placed in threshold
+        // 创建对象时初始化容量大小放在threshold中，此时只需要将其作为新的数组容量
+        newCap = oldThr;
+    else {
+        // signifies using defaults 无参构造函数创建的对象在这里计算容量和阈值
+        newCap = DEFAULT_INITIAL_CAPACITY;
+        newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
+    }
+    if (newThr == 0) {
+        // 创建时指定了初始化容量或者负载因子，在这里进行阈值初始化，
+    	// 或者扩容前的旧容量小于16，在这里计算新的resize上限
+        float ft = (float)newCap * loadFactor;
+        newThr = (newCap < MAXIMUM_CAPACITY && ft < (float)MAXIMUM_CAPACITY ? (int)ft : Integer.MAX_VALUE);
+    }
+    threshold = newThr;
+    @SuppressWarnings({"rawtypes","unchecked"})
+        Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
+    table = newTab;
+    if (oldTab != null) {
+        // 把每个bucket都移动到新的buckets中
+        for (int j = 0; j < oldCap; ++j) {
+            Node<K,V> e;
+            if ((e = oldTab[j]) != null) {
+                oldTab[j] = null;
+                if (e.next == null)
+                    // 只有一个节点，直接计算元素新的位置即可
+                    newTab[e.hash & (newCap - 1)] = e;
+                else if (e instanceof TreeNode)
+                    // 将红黑树拆分成2棵子树，拆分后的子树节点数小于等于6，则将树转化成链表
+                    ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
+                else {
+                    Node<K,V> loHead = null, loTail = null;
+                    Node<K,V> hiHead = null, hiTail = null;
+                    Node<K,V> next;
+                    do {
+                        next = e.next;
+                        // 原索引
+                        if ((e.hash & oldCap) == 0) {
+                            if (loTail == null)
+                                loHead = e;
+                            else
+                                loTail.next = e;
+                            loTail = e;
+                        }
+                        // 原索引+oldCap
+                        else {
+                            if (hiTail == null)
+                                hiHead = e;
+                            else
+                                hiTail.next = e;
+                            hiTail = e;
+                        }
+                    } while ((e = next) != null);
+                    // 原索引放到bucket里
+                    if (loTail != null) {
+                        loTail.next = null;
+                        newTab[j] = loHead;
+                    }
+                    // 原索引+oldCap放到bucket里
+                    if (hiTail != null) {
+                        hiTail.next = null;
+                        newTab[j + oldCap] = hiHead;
+                    }
+                }
+            }
+        }
+    }
+    return newTab;
+}
+```
+
+##### HashMap 常用方法测试
+
+```java
+package map;
+
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Set;
+
+public class HashMapDemo {
+
+    public static void main(String[] args) {
+        HashMap<String, String> map = new HashMap<String, String>();
+        // 键不能重复，值可以重复
+        map.put("san", "张三");
+        map.put("si", "李四");
+        map.put("wu", "王五");
+        map.put("wang", "老王");
+        map.put("wang", "老王2");// 老王被覆盖
+        map.put("lao", "老王");
+        System.out.println("-------直接输出hashmap:-------");
+        System.out.println(map);
+        /**
+         * 遍历HashMap
+         */
+        // 1.获取Map中的所有键
+        System.out.println("-------foreach获取Map中所有的键:------");
+        Set<String> keys = map.keySet();
+        for (String key : keys) {
+            System.out.print(key+"  ");
+        }
+        System.out.println();//换行
+        // 2.获取Map中所有值
+        System.out.println("-------foreach获取Map中所有的值:------");
+        Collection<String> values = map.values();
+        for (String value : values) {
+            System.out.print(value+"  ");
+        }
+        System.out.println();//换行
+        // 3.得到key的值的同时得到key所对应的值
+        System.out.println("-------得到key的值的同时得到key所对应的值:-------");
+        Set<String> keys2 = map.keySet();
+        for (String key : keys2) {
+            System.out.print(key + "：" + map.get(key)+"   ");
+
+        }
+        /**
+         * 如果既要遍历key又要value，那么建议这种方式，因为如果先获取keySet然后再执行map.get(key)，map内部会执行两次遍历。
+         * 一次是在获取keySet的时候，一次是在遍历所有key的时候。
+         */
+        // 当我调用put(key,value)方法的时候，首先会把key和value封装到
+        // Entry这个静态内部类对象中，把Entry对象再添加到数组中，所以我们想获取
+        // map中的所有键值对，我们只要获取数组中的所有Entry对象，接下来
+        // 调用Entry对象中的getKey()和getValue()方法就能获取键值对了
+        Set<java.util.Map.Entry<String, String>> entrys = map.entrySet();
+        for (java.util.Map.Entry<String, String> entry : entrys) {
+            System.out.println(entry.getKey() + "--" + entry.getValue());
+        }
+
+        /**
+         * HashMap其他常用方法
+         */
+        System.out.println("after map.size()："+map.size());
+        System.out.println("after map.isEmpty()："+map.isEmpty());
+        System.out.println(map.remove("san"));
+        System.out.println("after map.remove()："+map);
+        System.out.println("after map.get(si)："+map.get("si"));
+        System.out.println("after map.containsKey(si)："+map.containsKey("si"));
+        System.out.println("after containsValue(李四)："+map.containsValue("李四"));
+        System.out.println(map.replace("si", "李四2"));
+        System.out.println("after map.replace(si, 李四2):"+map);
+    }
+
+}
+```
+
+
+
 #### ConcurrentHashMap
+
+##### 1.7存储结构
+
+![Java 7 ConcurrentHashMap 存储结构](https://oss.javaguide.cn/github/javaguide/java/collection/java7_concurrenthashmap.png)
+
+Java 7 中 `ConcurrentHashMap` 的存储结构如上图，`ConcurrnetHashMap` 由很多个 `Segment` 组合，而每一个 `Segment` 是一个类似于 `HashMap` 的结构，所以每一个 `HashMap` 的内部可以进行扩容。但是 `Segment` 的个数一旦**初始化就不能改变**，默认 `Segment` 的个数是 16 个，可以认为 `ConcurrentHashMap` 默认支持最多 16 个线程并发。
+
+
+
+##### 初始化
+
+通过 `ConcurrentHashMap` 的无参构造探寻 `ConcurrentHashMap` 的初始化流程。
+
+```java
+    /**
+     * Creates a new, empty map with a default initial capacity (16),
+     * load factor (0.75) and concurrencyLevel (16).
+     */
+    public ConcurrentHashMap() {
+        this(DEFAULT_INITIAL_CAPACITY, DEFAULT_LOAD_FACTOR, DEFAULT_CONCURRENCY_LEVEL);
+    }
+```
+
+无参构造中调用了有参构造，传入了三个参数的默认值，他们的值是。
+
+```java
+    /**
+     * 默认初始化容量
+     */
+    static final int DEFAULT_INITIAL_CAPACITY = 16;
+
+    /**
+     * 默认负载因子
+     */
+    static final float DEFAULT_LOAD_FACTOR = 0.75f;
+
+    /**
+     * 默认并发级别
+     */
+    static final int DEFAULT_CONCURRENCY_LEVEL = 16;
+```
+
+接着看下这个有参构造函数的内部实现逻辑。
+
+```java
+@SuppressWarnings("unchecked")
+public ConcurrentHashMap(int initialCapacity,float loadFactor, int concurrencyLevel) {
+    // 参数校验
+    if (!(loadFactor > 0) || initialCapacity < 0 || concurrencyLevel <= 0)
+        throw new IllegalArgumentException();
+    // 校验并发级别大小，大于 1<<16，重置为 65536
+    if (concurrencyLevel > MAX_SEGMENTS)
+        concurrencyLevel = MAX_SEGMENTS;
+    // Find power-of-two sizes best matching arguments
+    // 2的多少次方
+    int sshift = 0;
+    int ssize = 1;
+    // 这个循环可以找到 concurrencyLevel 之上最近的 2的次方值
+    while (ssize < concurrencyLevel) {
+        ++sshift;
+        ssize <<= 1;
+    }
+    // 记录段偏移量
+    this.segmentShift = 32 - sshift;
+    // 记录段掩码
+    this.segmentMask = ssize - 1;
+    // 设置容量
+    if (initialCapacity > MAXIMUM_CAPACITY)
+        initialCapacity = MAXIMUM_CAPACITY;
+    // c = 容量 / ssize ，默认 16 / 16 = 1，这里是计算每个 Segment 中的类似于 HashMap 的容量
+    int c = initialCapacity / ssize;
+    if (c * ssize < initialCapacity)
+        ++c;
+    int cap = MIN_SEGMENT_TABLE_CAPACITY;
+    //Segment 中的类似于 HashMap 的容量至少是2或者2的倍数
+    while (cap < c)
+        cap <<= 1;
+    // create segments and segments[0]
+    // 创建 Segment 数组，设置 segments[0]
+    Segment<K,V> s0 = new Segment<K,V>(loadFactor, (int)(cap * loadFactor),
+                         (HashEntry<K,V>[])new HashEntry[cap]);
+    Segment<K,V>[] ss = (Segment<K,V>[])new Segment[ssize];
+    UNSAFE.putOrderedObject(ss, SBASE, s0); // ordered write of segments[0]
+    this.segments = ss;
+}
+```
+
+总结一下在 Java 7 中 ConcurrentHashMap 的初始化逻辑。
+
+1. 必要参数校验。
+2. 校验并发级别 `concurrencyLevel` 大小，如果大于最大值，重置为最大值。无参构造**默认值是 16.**
+3. 寻找并发级别 `concurrencyLevel` 之上最近的 **2 的幂次方**值，作为初始化容量大小，**默认是 16**。
+4. 记录 `segmentShift` 偏移量，这个值为【容量 = 2 的 N 次方】中的 N，在后面 Put 时计算位置时会用到。**默认是 32 - sshift = 28**.
+5. 记录 `segmentMask`，默认是 ssize - 1 = 16 -1 = 15.
+6. **初始化 `segments[0]`**，**默认大小为 2**，**负载因子 0.75**，**扩容阀值是 2\*0.75=1.5**，插入第二个值时才会进行扩容。
+
+
+
+##### put
+
+接着上面的初始化参数继续查看 put 方法源码。
+
+```java
+public V put(K key, V value) {
+    Segment<K,V> s;
+    if (value == null)
+        throw new NullPointerException();
+    int hash = hash(key);
+    // hash 值无符号右移 28位（初始化时获得），然后与 segmentMask=15 做与运算
+    // 其实也就是把高4位与segmentMask（1111）做与运算
+    int j = (hash >>> segmentShift) & segmentMask;
+    if ((s = (Segment<K,V>)UNSAFE.getObject          // nonvolatile; recheck
+         (segments, (j << SSHIFT) + SBASE)) == null) //  in ensureSegment
+        // 如果查找到的 Segment 为空，初始化
+        s = ensureSegment(j);
+    return s.put(key, hash, value, false);
+}
+
+@SuppressWarnings("unchecked")
+private Segment<K,V> ensureSegment(int k) {
+    final Segment<K,V>[] ss = this.segments;
+    long u = (k << SSHIFT) + SBASE; // raw offset
+    Segment<K,V> seg;
+    // 判断 u 位置的 Segment 是否为null
+    if ((seg = (Segment<K,V>)UNSAFE.getObjectVolatile(ss, u)) == null) {
+        Segment<K,V> proto = ss[0]; // use segment 0 as prototype
+        // 获取0号 segment 里的 HashEntry<K,V> 初始化长度
+        int cap = proto.table.length;
+        // 获取0号 segment 里的 hash 表里的扩容负载因子，所有的 segment 的 loadFactor 是相同的
+        float lf = proto.loadFactor;
+        // 计算扩容阀值
+        int threshold = (int)(cap * lf);
+        // 创建一个 cap 容量的 HashEntry 数组
+        HashEntry<K,V>[] tab = (HashEntry<K,V>[])new HashEntry[cap];
+        if ((seg = (Segment<K,V>)UNSAFE.getObjectVolatile(ss, u)) == null) { // recheck
+            // 再次检查 u 位置的 Segment 是否为null，因为这时可能有其他线程进行了操作
+            Segment<K,V> s = new Segment<K,V>(lf, threshold, tab);
+            // 自旋检查 u 位置的 Segment 是否为null
+            while ((seg = (Segment<K,V>)UNSAFE.getObjectVolatile(ss, u))
+                   == null) {
+                // 使用CAS 赋值，只会成功一次
+                if (UNSAFE.compareAndSwapObject(ss, u, null, seg = s))
+                    break;
+            }
+        }
+    }
+    return seg;
+}
+```
+
+上面的源码分析了 `ConcurrentHashMap` 在 put 一个数据时的处理流程，下面梳理下具体流程。
+
+1. 计算要 put 的 key 的位置，获取指定位置的 `Segment`。
+
+2. 如果指定位置的 `Segment` 为空，则初始化这个 `Segment`.
+
+   **初始化 Segment 流程：**
+
+   1. 检查计算得到的位置的 `Segment` 是否为 null.
+   2. 为 null 继续初始化，使用 `Segment[0]` 的容量和负载因子创建一个 `HashEntry` 数组。
+   3. 再次检查计算得到的指定位置的 `Segment` 是否为 null.
+   4. 使用创建的 `HashEntry` 数组初始化这个 Segment.
+   5. 自旋判断计算得到的指定位置的 `Segment` 是否为 null，使用 CAS 在这个位置赋值为 `Segment`.
+
+3. `Segment.put` 插入 key,value 值。
+
+
+
+上面探究了获取 `Segment` 段和初始化 `Segment` 段的操作。最后一行的 `Segment` 的 put 方法还没有查看，继续分析。
+
+```java
+final V put(K key, int hash, V value, boolean onlyIfAbsent) {
+    // 获取 ReentrantLock 独占锁，获取不到，scanAndLockForPut 获取。
+    HashEntry<K,V> node = tryLock() ? null : scanAndLockForPut(key, hash, value);
+    V oldValue;
+    try {
+        HashEntry<K,V>[] tab = table;
+        // 计算要put的数据位置
+        int index = (tab.length - 1) & hash;
+        // CAS 获取 index 坐标的值
+        HashEntry<K,V> first = entryAt(tab, index);
+        for (HashEntry<K,V> e = first;;) {
+            if (e != null) {
+                // 检查是否 key 已经存在，如果存在，则遍历链表寻找位置，找到后替换 value
+                K k;
+                if ((k = e.key) == key ||
+                    (e.hash == hash && key.equals(k))) {
+                    oldValue = e.value;
+                    if (!onlyIfAbsent) {
+                        e.value = value;
+                        ++modCount;
+                    }
+                    break;
+                }
+                e = e.next;
+            }
+            else {
+                // first 有值没说明 index 位置已经有值了，有冲突，链表头插法。
+                if (node != null)
+                    node.setNext(first);
+                else
+                    node = new HashEntry<K,V>(hash, key, value, first);
+                int c = count + 1;
+                // 容量大于扩容阀值，小于最大容量，进行扩容
+                if (c > threshold && tab.length < MAXIMUM_CAPACITY)
+                    rehash(node);
+                else
+                    // index 位置赋值 node，node 可能是一个元素，也可能是一个链表的表头
+                    setEntryAt(tab, index, node);
+                ++modCount;
+                count = c;
+                oldValue = null;
+                break;
+            }
+        }
+    } finally {
+        unlock();
+    }
+    return oldValue;
+}
+```
+
+由于 `Segment` 继承了 `ReentrantLock`，所以 `Segment` 内部可以很方便的获取锁，put 流程就用到了这个功能。
+
+1. `tryLock()` 获取锁，获取不到使用 **`scanAndLockForPut`** 方法继续获取。
+
+2. 计算 put 的数据要放入的 index 位置，然后获取这个位置上的 `HashEntry` 。
+
+3. 遍历 put 新元素，为什么要遍历？因为这里获取的 `HashEntry` 可能是一个空元素，也可能是链表已存在，所以要区别对待。
+
+   如果这个位置上的 **`HashEntry` 不存在**：
+
+   1. 如果当前容量大于扩容阀值，小于最大容量，**进行扩容**。
+   2. 直接头插法插入。
+
+   如果这个位置上的 **`HashEntry` 存在**：
+
+   1. 判断链表当前元素 key 和 hash 值是否和要 put 的 key 和 hash 值一致。一致则替换值
+   2. 不一致，获取链表下一个节点，直到发现相同进行值替换，或者链表表里完毕没有相同的。 
+      1. 如果当前容量大于扩容阀值，小于最大容量，**进行扩容**。
+      2. 直接链表头插法插入。
+
+4. 如果要插入的位置之前已经存在，替换后返回旧值，否则返回 null.
+
+这里面的第一步中的 `scanAndLockForPut` 操作这里没有介绍，这个方法做的操作就是不断的自旋 `tryLock()` 获取锁。当自旋次数大于指定次数时，使用 `lock()` 阻塞获取锁。在自旋时顺表获取下 hash 位置的 `HashEntry`。
+
+```java
+private HashEntry<K,V> scanAndLockForPut(K key, int hash, V value) {
+    HashEntry<K,V> first = entryForHash(this, hash);
+    HashEntry<K,V> e = first;
+    HashEntry<K,V> node = null;
+    int retries = -1; // negative while locating node
+    // 自旋获取锁
+    while (!tryLock()) {
+        HashEntry<K,V> f; // to recheck first below
+        if (retries < 0) {
+            if (e == null) {
+                if (node == null) // speculatively create node
+                    node = new HashEntry<K,V>(hash, key, value, null);
+                retries = 0;
+            }
+            else if (key.equals(e.key))
+                retries = 0;
+            else
+                e = e.next;
+        }
+        else if (++retries > MAX_SCAN_RETRIES) {
+            // 自旋达到指定次数后，阻塞等到只到获取到锁
+            lock();
+            break;
+        }
+        else if ((retries & 1) == 0 &&
+                 (f = entryForHash(this, hash)) != first) {
+            e = first = f; // re-traverse if entry changed
+            retries = -1;
+        }
+    }
+    return node;
+}
+```
+
+##### 扩容 rehash
+
+`ConcurrentHashMap` 的扩容只会扩容到原来的两倍。老数组里的数据移动到新的数组时，位置要么不变，要么变为 `index+ oldSize`，参数里的 node 会在扩容之后使用链表**头插法**插入到指定位置。
+
+```java
+private void rehash(HashEntry<K,V> node) {
+    HashEntry<K,V>[] oldTable = table;
+    // 老容量
+    int oldCapacity = oldTable.length;
+    // 新容量，扩大两倍
+    int newCapacity = oldCapacity << 1;
+    // 新的扩容阀值
+    threshold = (int)(newCapacity * loadFactor);
+    // 创建新的数组
+    HashEntry<K,V>[] newTable = (HashEntry<K,V>[]) new HashEntry[newCapacity];
+    // 新的掩码，默认2扩容后是4，-1是3，二进制就是11。
+    int sizeMask = newCapacity - 1;
+    for (int i = 0; i < oldCapacity ; i++) {
+        // 遍历老数组
+        HashEntry<K,V> e = oldTable[i];
+        if (e != null) {
+            HashEntry<K,V> next = e.next;
+            // 计算新的位置，新的位置只可能是不便或者是老的位置+老的容量。
+            int idx = e.hash & sizeMask;
+            if (next == null)   //  Single node on list
+                // 如果当前位置还不是链表，只是一个元素，直接赋值
+                newTable[idx] = e;
+            else { // Reuse consecutive sequence at same slot
+                // 如果是链表了
+                HashEntry<K,V> lastRun = e;
+                int lastIdx = idx;
+                // 新的位置只可能是不便或者是老的位置+老的容量。
+                // 遍历结束后，lastRun 后面的元素位置都是相同的
+                for (HashEntry<K,V> last = next; last != null; last = last.next) {
+                    int k = last.hash & sizeMask;
+                    if (k != lastIdx) {
+                        lastIdx = k;
+                        lastRun = last;
+                    }
+                }
+                // ，lastRun 后面的元素位置都是相同的，直接作为链表赋值到新位置。
+                newTable[lastIdx] = lastRun;
+                // Clone remaining nodes
+                for (HashEntry<K,V> p = e; p != lastRun; p = p.next) {
+                    // 遍历剩余元素，头插法到指定 k 位置。
+                    V v = p.value;
+                    int h = p.hash;
+                    int k = h & sizeMask;
+                    HashEntry<K,V> n = newTable[k];
+                    newTable[k] = new HashEntry<K,V>(h, p.key, v, n);
+                }
+            }
+        }
+    }
+    // 头插法插入新的节点
+    int nodeIndex = node.hash & sizeMask; // add the new node
+    node.setNext(newTable[nodeIndex]);
+    newTable[nodeIndex] = node;
+    table = newTable;
+}
+```
+
+有些同学可能会对最后的两个 for 循环有疑惑，这里第一个 for 是为了寻找这样一个节点，这个节点后面的所有 next 节点的新位置都是相同的。然后把这个作为一个链表赋值到新位置。第二个 for 循环是为了把剩余的元素通过头插法插入到指定位置链表。这样实现的原因可能是基于概率统计，有深入研究的同学可以发表下意见。
+
+##### get
+
+到这里就很简单了，get 方法只需要两步即可。
+
+1. 计算得到 key 的存放位置。
+2. 遍历指定位置查找相同 key 的 value 值。
+
+```java
+public V get(Object key) {
+    Segment<K,V> s; // manually integrate access methods to reduce overhead
+    HashEntry<K,V>[] tab;
+    int h = hash(key);
+    long u = (((h >>> segmentShift) & segmentMask) << SSHIFT) + SBASE;
+    // 计算得到 key 的存放位置
+    if ((s = (Segment<K,V>)UNSAFE.getObjectVolatile(segments, u)) != null &&
+        (tab = s.table) != null) {
+        for (HashEntry<K,V> e = (HashEntry<K,V>) UNSAFE.getObjectVolatile
+                 (tab, ((long)(((tab.length - 1) & h)) << TSHIFT) + TBASE);
+             e != null; e = e.next) {
+            // 如果是链表，遍历查找到相同 key 的 value。
+            K k;
+            if ((k = e.key) == key || (e.hash == h && key.equals(k)))
+                return e.value;
+        }
+    }
+    return null;
+}
+```
+
+
+
+##### 1.8存储结构
+
+![](https://raw.githubusercontent.com/ZXJ-OvO/picgo-img/master/202307172035767.png)Java8 ConcurrentHashMap 存储结构（图片来自 javadoop)
+
+可以发现 Java8 的 ConcurrentHashMap 相对于 Java7 来说变化比较大，不再是之前的 **Segment 数组 + HashEntry 数组 + 链表**，而是 **Node 数组 + 链表 / 红黑树**。当冲突链表达到一定长度时，链表会转换成红黑树。
+
+
+
+##### 初始化
+
+```java
+/**
+ * Initializes table, using the size recorded in sizeCtl.
+ */
+private final Node<K,V>[] initTable() {
+    Node<K,V>[] tab; int sc;
+    while ((tab = table) == null || tab.length == 0) {
+        //　如果 sizeCtl < 0 ,说明另外的线程执行CAS 成功，正在进行初始化。
+        if ((sc = sizeCtl) < 0)
+            // 让出 CPU 使用权
+            Thread.yield(); // lost initialization race; just spin
+        else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
+            try {
+                if ((tab = table) == null || tab.length == 0) {
+                    int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
+                    @SuppressWarnings("unchecked")
+                    Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
+                    table = tab = nt;
+                    sc = n - (n >>> 2);
+                }
+            } finally {
+                sizeCtl = sc;
+            }
+            break;
+        }
+    }
+    return tab;
+}
+```
+
+从源码中可以发现 `ConcurrentHashMap` 的初始化是通过**自旋和 CAS** 操作完成的。里面需要注意的是变量 `sizeCtl` ，它的值决定着当前的初始化状态。
+
+1. -1 说明正在初始化
+2. -N 说明有 N-1 个线程正在进行扩容
+3. 0 表示 table 初始化大小，如果 table 没有初始化
+4. \>0 表示 table 扩容的阈值，如果 table 已经初始化。
+
+##### put
+
+直接过一遍 put 源码。
+
+```java
+public V put(K key, V value) {
+    return putVal(key, value, false);
+}
+
+/** Implementation for put and putIfAbsent */
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+    // key 和 value 不能为空
+    if (key == null || value == null) throw new NullPointerException();
+    int hash = spread(key.hashCode());
+    int binCount = 0;
+    for (Node<K,V>[] tab = table;;) {
+        // f = 目标位置元素
+        Node<K,V> f; int n, i, fh;// fh 后面存放目标位置的元素 hash 值
+        if (tab == null || (n = tab.length) == 0)
+            // 数组桶为空，初始化数组桶（自旋+CAS)
+            tab = initTable();
+        else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+            // 桶内为空，CAS 放入，不加锁，成功了就直接 break 跳出
+            if (casTabAt(tab, i, null,new Node<K,V>(hash, key, value, null)))
+                break;  // no lock when adding to empty bin
+        }
+        else if ((fh = f.hash) == MOVED)
+            tab = helpTransfer(tab, f);
+        else {
+            V oldVal = null;
+            // 使用 synchronized 加锁加入节点
+            synchronized (f) {
+                if (tabAt(tab, i) == f) {
+                    // 说明是链表
+                    if (fh >= 0) {
+                        binCount = 1;
+                        // 循环加入新的或者覆盖节点
+                        for (Node<K,V> e = f;; ++binCount) {
+                            K ek;
+                            if (e.hash == hash &&
+                                ((ek = e.key) == key ||
+                                 (ek != null && key.equals(ek)))) {
+                                oldVal = e.val;
+                                if (!onlyIfAbsent)
+                                    e.val = value;
+                                break;
+                            }
+                            Node<K,V> pred = e;
+                            if ((e = e.next) == null) {
+                                pred.next = new Node<K,V>(hash, key,
+                                                          value, null);
+                                break;
+                            }
+                        }
+                    }
+                    else if (f instanceof TreeBin) {
+                        // 红黑树
+                        Node<K,V> p;
+                        binCount = 2;
+                        if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
+                                                       value)) != null) {
+                            oldVal = p.val;
+                            if (!onlyIfAbsent)
+                                p.val = value;
+                        }
+                    }
+                }
+            }
+            if (binCount != 0) {
+                if (binCount >= TREEIFY_THRESHOLD)
+                    treeifyBin(tab, i);
+                if (oldVal != null)
+                    return oldVal;
+                break;
+            }
+        }
+    }
+    addCount(1L, binCount);
+    return null;
+}
+```
+
+1. 根据 key 计算出 hashcode 。
+2. 判断是否需要进行初始化。
+3. 即为当前 key 定位出的 Node，如果为空表示当前位置可以写入数据，利用 CAS 尝试写入，失败则自旋保证成功。
+4. 如果当前位置的 `hashcode == MOVED == -1`,则需要进行扩容。
+5. 如果都不满足，则利用 synchronized 锁写入数据。
+6. 如果数量大于 `TREEIFY_THRESHOLD` 则要执行树化方法，在 `treeifyBin` 中会首先判断当前数组长度 ≥64 时才会将链表转换为红黑树。
+
+
+
+##### get
+
+get 流程比较简单，直接过一遍源码。
+
+```java
+public V get(Object key) {
+    Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+    // key 所在的 hash 位置
+    int h = spread(key.hashCode());
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (e = tabAt(tab, (n - 1) & h)) != null) {
+        // 如果指定位置元素存在，头结点hash值相同
+        if ((eh = e.hash) == h) {
+            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+                // key hash 值相等，key值相同，直接返回元素 value
+                return e.val;
+        }
+        else if (eh < 0)
+            // 头结点hash值小于0，说明正在扩容或者是红黑树，find查找
+            return (p = e.find(h, key)) != null ? p.val : null;
+        while ((e = e.next) != null) {
+            // 是链表，遍历查找
+            if (e.hash == h &&
+                ((ek = e.key) == key || (ek != null && key.equals(ek))))
+                return e.val;
+        }
+    }
+    return null;
+}
+```
+
+总结：
+
+1. 根据 hash 值计算位置。
+2. 查找到指定位置，如果头节点就是要找的，直接返回它的 value.
+3. 如果头节点 hash 值小于 0 ，说明正在扩容或者是红黑树，查找之。
+4. 如果是链表，遍历查找之。
+
+
+
+
 
 #### LinkedHashMap
 
