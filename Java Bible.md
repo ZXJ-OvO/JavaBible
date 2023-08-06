@@ -575,6 +575,18 @@ public class BigDecimalUtil {
 
 
 
+#### 静态变量和实例变量有什么区别
+
+|              | 静态变量                   | 实例变量                                             |
+| ------------ | -------------------------- | ---------------------------------------------------- |
+| 定义、初始化 | static修饰、类加载时初始化 | 在类中定义、每个对象有独立的副本，在对象创建时初始化 |
+| 存储位置     | 方法区                     | 对象的堆内存中                                       |
+| 生命周期     | 和类同步                   | 和对象同步                                           |
+| 访问方式     | 通过类名访问               | ，通过对象引用访问                                   |
+| 用途         | 与类相关的常量或共享数据   | 存储对象特定的状态信息                               |
+
+
+
 ####  字符型常量和字符串常量的区别?
 
 - **形式** : 字符常量是单引号引起的一个字符，字符串常量是双引号引起的 0 个或若干个字符。
@@ -584,6 +596,12 @@ public class BigDecimalUtil {
 
 
 ### 方法
+
+#### 是否可以从一个static方法内部发出对非static方法的调用？
+
+从一个静态方法内部可以调用非静态方法，但前提是必须先创建该类的对象。
+
+
 
 #### 什么是方法的返回值?方法有哪几种类型？
 
@@ -4337,6 +4355,26 @@ Java 集合框架如下图所示：
 ![java-collection-hierarchy](https://raw.githubusercontent.com/ZXJ-OvO/picgo-img/master/202307152120339.png)
 
 注：图中只列举了主要的继承派生关系，并没有列举所有关系。
+
+
+
+####  Collection 和 Collections 的区别。
+
+`Collection` 和 `Collections` 是 Java 中的两个不同概念：
+
+1. `Collection`：
+   - `Collection` 是 Java 单列集合框架的顶层接口，表示一组对象的集合，用于存储和操作多个对象。
+   - 它继承自 `java.util.Iterable` 接口，因此可以使用迭代器来遍历其中的元素。
+   - `Collection` 接口的常见实现类包括 `List`、`Set` 和 `Queue` 等。
+
+2. `Collections`：
+   - `Collections` 是 Java 提供的一个实用类，包含一些静态方法，用于操作集合对象。
+   - 这些静态方法提供了对集合的排序、搜索、替换、同步等操作，方便对集合进行管理和处理。
+   - 不要与 `Collection` 混淆，`Collections` 类中的方法不是对集合对象的操作，而是通过传入集合对象来进行相关操作。
+
+总结：`Collection` 是 Java 集合框架的接口，用于表示一组对象的集合；`Collections` 是 Java 提供的实用类，用于操作集合对象。
+
+
 
 
 
@@ -11117,9 +11155,70 @@ public static void main(String[] args) {
 
 ## JDK新特性
 
+
+
+# 前端基础
+
+#### setInterval()和setTimeout()的作用，怎么关闭setInterval()
+
+`setInterval()` 和 `setTimeout()` 是 JavaScript 中的定时器函数，用于在指定的时间间隔或延迟后执行指定的函数或代码块。
+
+1. `setInterval()`：
+   - `setInterval()` 函数用于重复执行指定的函数或代码块，每隔一定的时间间隔执行一次，直到被取消。
+   - 它接受两个参数：第一个参数是要执行的函数或代码块，第二个参数是时间间隔（以毫秒为单位）。
+   - 例如：`setInterval(function(){ /* code to be executed */ }, 1000);` 会每隔一秒执行一次指定的代码块。
+
+2. `setTimeout()`：
+   - `setTimeout()` 函数用于延迟执行指定的函数或代码块，只执行一次。
+   - 它接受两个参数：第一个参数是要执行的函数或代码块，第二个参数是延迟时间（以毫秒为单位）。
+   - 例如：`setTimeout(function(){ /* code to be executed */ }, 2000);` 会在延迟两秒后执行指定的代码块。
+
+关闭 `setInterval()` 定时器的方法是使用 `clearInterval()` 函数。`clearInterval()` 接受一个参数，即要取消的定时器的标识符（返回值为 `setInterval()` 的调用结果）。例如：
+
+```javascript
+const intervalId = setInterval(function() {
+  /* code to be executed repeatedly */
+}, 1000);
+
+// 要取消定时器，调用 clearInterval() 并传入标识符
+clearInterval(intervalId);
+```
+
+以上代码将会停止之前使用 `setInterval()` 设置的定时器，不再执行指定的代码块。
+
+
+
 # 计算机基础
 
 ## 计算机网络
+
+#### HTTP 请求的 GET 与 POST 方式的区别
+
+HTTP 请求的 GET 和 POST 方式是两种常用的请求方法，它们在以下几个方面有区别：
+
+1. 参数传递方式：
+   - GET：参数通过 URL 的查询字符串传递，以键值对的形式出现在 URL 后面，例如 `https://example.com/api?param1=value1&param2=value2`
+   - POST：参数通过请求体传递，以键值对或其他格式（如 JSON）出现在请求的主体中。
+
+2. 数据安全性：
+   - GET：参数暴露在 URL 中，可能会被保存在浏览器历史记录或服务器日志中，不适合传递敏感信息。
+   - POST：参数在请求体中，相对更安全，不会出现在 URL 中，适合传递敏感信息。
+
+3. 数据长度限制：
+   - GET：URL 有长度限制，不同浏览器和服务器对 URL 长度的限制可能不同，通常较小。
+   - POST：由于参数在请求体中，通常没有明显长度限制，可以传递较大的数据。
+
+4. 数据语义：
+   - GET：用于获取资源，请求应该是无副作用的，不应该对服务器数据做修改。
+   - POST：用于提交数据，可能对服务器产生副作用，会修改服务器上的数据。
+
+5. 缓存：
+   - GET：可被缓存，浏览器会缓存 GET 请求的结果。
+   - POST：默认不可被缓存，不会被浏览器缓存。
+
+总结：GET 适用于获取数据，参数在 URL 中传递，不适合传递敏感信息，而 POST 适用于提交数据，参数在请求体中传递，相对更安全，适合传递敏感信息和大量数据。
+
+
 
 ## 操作系统
 
