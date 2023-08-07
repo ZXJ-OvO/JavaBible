@@ -11311,6 +11311,13 @@ Maven 的依赖范围如下：
 - **runtime**：运行时依赖范围，对于测试和运行有效，但是在编译主代码时无效，如 JDBC 驱动
 - **system**：系统依赖范围，使用 system 范围的依赖时必须通过 systemPath 元素显示地指定依赖文件的路径，不依赖 Maven 仓库解析，所以可能会造成建构的不可移植
 
+| **scope value** | **主程序** | **测试程序** | **打包（运行）** | **范例**    |
+| --------------- | ---------- | ------------ | ---------------- | ----------- |
+| compile（默认） | Y          | Y            | Y                | log4j       |
+| test            | -          | Y            | -                | junit       |
+| provided        | Y          | Y            | -                | servlet-api |
+| runtime         | -          | Y            | Y                | jdbc驱动    |
+
 
 
 #### 传递依赖性
@@ -11457,11 +11464,17 @@ Maven 定义了 3 个生命周期`META-INF/plexus/components.xml`：
 
 这些生命周期是相互独立的，每个生命周期包含多个阶段(phase)。并且，这些阶段是有序的，也就是说，后面的阶段依赖于前面的阶段。当执行某个阶段的时候，会先执行它前面的阶段。
 
+![image-20230807095930696](https://raw.githubusercontent.com/ZXJ-OvO/picgo-img/master/202308070959024.png)
+
 执行 Maven 生命周期的命令格式如下：
 
 ```bash
 mvn 阶段 [阶段2] ...[阶段n]
 ```
+
+![image-20230807095900178](https://raw.githubusercontent.com/ZXJ-OvO/picgo-img/master/202308070959613.png)
+
+
 
 
 
@@ -11649,8 +11662,6 @@ Maven 插件被分为下面两种类型：
 
 
 多模块管理下，会有一个父模块，其他的都是子模块。父模块通常只有一个 `pom.xml`，没有其他内容。父模块的 `pom.xml` 一般只定义了各个依赖的版本号、包含哪些子模块以及插件有哪些。不过，要注意的是，如果依赖只在某个子项目中使用，则可以在子项目的 pom.xml 中直接引入，防止父 pom 的过于臃肿。
-
-如下图所示，Dubbo 项目就被分成了多个子模块比如 dubbo-common（公共逻辑模块）、dubbo-remoting（远程通讯模块）、dubbo-rpc（远程调用模块）。
 
 
 
